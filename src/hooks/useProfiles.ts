@@ -7,8 +7,12 @@ export function useProfiles() {
   return profiles ?? [];
 }
 
-export async function addProfile(profile: Omit<Profile, 'id' | 'createdAt'>) {
-  return db.profiles.add({ ...profile, createdAt: new Date() });
+export async function addProfile(profile: Omit<Profile, 'id' | 'createdAt' | 'uuid'> & { uuid?: string }) {
+  return db.profiles.add({
+    ...profile,
+    uuid: profile.uuid ?? crypto.randomUUID(),
+    createdAt: new Date(),
+  });
 }
 
 export async function updateProfile(id: number, changes: Partial<Profile>) {
@@ -16,7 +20,6 @@ export async function updateProfile(id: number, changes: Partial<Profile>) {
 }
 
 export async function deleteProfile(id: number) {
-  // Also delete associated medications and logs
   const meds = await db.medications.where('profileId').equals(id).toArray();
   const medIds = meds.map((m) => m.id!);
   await db.doseLogs.where('profileId').equals(id).delete();

@@ -24,7 +24,7 @@ export function Medications() {
   const [editMed, setEditMed] = useState<Medication | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Medication | null>(null);
 
-  const handleSave = async (data: Omit<Medication, 'id' | 'createdAt'>) => {
+  const handleSave = async (data: Omit<Medication, 'id' | 'createdAt' | 'uuid' | 'updatedAt'>) => {
     if (editMed?.id) {
       await updateMedication(editMed.id, data);
     } else {

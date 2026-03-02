@@ -19,7 +19,7 @@ const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 interface MedicationFormProps {
   profileId: number;
   initial?: Partial<Medication>;
-  onSave: (data: Omit<Medication, 'id' | 'createdAt'>) => void;
+  onSave: (data: Omit<Medication, 'id' | 'createdAt' | 'uuid' | 'updatedAt'>) => void;
   onCancel: () => void;
 }
 

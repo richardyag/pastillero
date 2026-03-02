@@ -6,9 +6,9 @@ import { ProfileForm } from '../components/profiles/ProfileForm';
 import { useProfiles, addProfile, updateProfile, deleteProfile } from '../hooks/useProfiles';
 import { useMedications } from '../hooks/useMedications';
 import { db } from '../db/database';
-import { exportProfileData, downloadExport, parseImportData, generateShareableText } from '../utils/export';
+import { exportProfileData, downloadExport, parseImportData, generateShareableText, mergeImportData } from '../utils/export';
 import { ProfileContext } from '../context/ProfileContext';
-import type { Profile } from '../types';
+import type { Profile, ImportResult } from '../types';
 
 export function Profiles() {
   const profiles = useProfiles();
@@ -16,11 +16,11 @@ export function Profiles() {
   const [showForm, setShowForm] = useState(false);
   const [editProfile, setEditProfile] = useState<Profile | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Profile | null>(null);
-  const [importSuccess, setImportSuccess] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleSave = async (data: Omit<Profile, 'id' | 'createdAt' | 'isDefault'>) => {
+  const handleSave = async (data: Omit<Profile, 'id' | 'createdAt' | 'isDefault' | 'uuid'>) => {
     if (editProfile?.id) {
       await updateProfile(editProfile.id, data);
     } else {
@@ -65,6 +65,8 @@ export function Profiles() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
+      setImportError('');
+      setImportResult(null);
       const content = ev.target?.result as string;
       const data = parseImportData(content);
       if (!data) {
@@ -72,37 +74,12 @@ export function Profiles() {
         return;
       }
       try {
-        // Check if profile with same name exists
-        const existing = profiles.find((p) => p.name === data.profile.name);
-        let profileId: number;
-
-        if (existing?.id) {
-          profileId = existing.id;
-          await updateProfile(profileId, { ...data.profile });
-        } else {
-          profileId = Number(await addProfile({ ...data.profile, isDefault: false }));
-        }
-
-        // Import medications (avoid duplicates by name)
-        for (const med of data.medications) {
-          const exists = await db.medications
-            .where('profileId').equals(profileId)
-            .and((m) => m.name === med.name)
-            .first();
-          if (!exists) {
-            await db.medications.add({ ...med, id: undefined, profileId, createdAt: new Date() });
-          }
-        }
-
-        // Import logs
-        for (const log of data.recentLogs) {
-          await db.doseLogs.add({ ...log, id: undefined, profileId });
-        }
-
-        setImportSuccess(true);
+        const { result, profileId } = await mergeImportData(data);
+        setImportResult(result);
         setActiveProfileId(profileId);
-        setTimeout(() => setImportSuccess(false), 3000);
-      } catch {
+        setTimeout(() => setImportResult(null), 8000);
+      } catch (err) {
+        console.error(err);
         setImportError('Error al importar los datos. Intenta nuevamente.');
       }
     };
@@ -121,13 +98,48 @@ export function Profiles() {
         </div>
       </div>
 
-      {/* Import success banner */}
-      {importSuccess && (
-        <div className="mx-4 mt-3 bg-emerald-50 border border-emerald-200 rounded-2xl p-3 flex items-center gap-2 animate-fade-in">
-          <Check size={18} className="text-emerald-600" />
-          <p className="text-sm text-emerald-700 font-semibold">¡Perfil importado correctamente!</p>
+      {/* Import result banner */}
+      {importResult && (
+        <div className="mx-4 mt-3 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 animate-fade-in">
+          <div className="flex items-center gap-2 mb-2">
+            <Check size={18} className="text-emerald-600 flex-shrink-0" />
+            <p className="text-sm text-emerald-800 font-bold">
+              {importResult.profileCreated ? 'Perfil importado correctamente' : 'Perfil actualizado correctamente'}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 text-xs">
+            {importResult.medicationsAdded > 0 && (
+              <div className="bg-emerald-100 rounded-lg px-2 py-1 text-emerald-700">
+                ✓ {importResult.medicationsAdded} medicamento{importResult.medicationsAdded !== 1 ? 's' : ''} nuevo{importResult.medicationsAdded !== 1 ? 's' : ''}
+              </div>
+            )}
+            {importResult.medicationsUpdated > 0 && (
+              <div className="bg-blue-100 rounded-lg px-2 py-1 text-blue-700">
+                ↻ {importResult.medicationsUpdated} actualizado{importResult.medicationsUpdated !== 1 ? 's' : ''} (cambió esquema)
+              </div>
+            )}
+            {importResult.medicationsUnchanged > 0 && (
+              <div className="bg-gray-100 rounded-lg px-2 py-1 text-gray-600">
+                = {importResult.medicationsUnchanged} sin cambios
+              </div>
+            )}
+            {importResult.logsAdded > 0 && (
+              <div className="bg-emerald-100 rounded-lg px-2 py-1 text-emerald-700">
+                + {importResult.logsAdded} registro{importResult.logsAdded !== 1 ? 's' : ''} de dosis
+              </div>
+            )}
+            {importResult.logsDuplicated > 0 && (
+              <div className="bg-gray-100 rounded-lg px-2 py-1 text-gray-500">
+                ○ {importResult.logsDuplicated} registro{importResult.logsDuplicated !== 1 ? 's' : ''} ya existían
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-emerald-600 mt-2">
+            Tus propios datos no fueron modificados.
+          </p>
         </div>
       )}
+
       {importError && (
         <div className="mx-4 mt-3 bg-red-50 border border-red-200 rounded-2xl p-3">
           <p className="text-sm text-red-700">{importError}</p>
@@ -145,8 +157,8 @@ export function Profiles() {
             <Upload size={20} className="text-primary-600" />
           </div>
           <div>
-            <p className="font-semibold text-gray-700 text-sm">Importar perfil</p>
-            <p className="text-xs text-gray-400">Cargar archivo .json compartido por un familiar</p>
+            <p className="font-semibold text-gray-700 text-sm">Importar / Actualizar perfil</p>
+            <p className="text-xs text-gray-400">Cargar .json de un familiar. Solo agrega lo nuevo, nunca borra tus datos.</p>
           </div>
         </button>
         <input ref={fileRef} type="file" accept=".json" onChange={handleImportFile} className="hidden" />
@@ -236,7 +248,12 @@ function ProfileCard({
         <div className="flex-1">
           <p className="font-bold text-gray-900">{profile.name}</p>
           <p className="text-sm text-gray-500">{RELATIONSHIP_LABEL[profile.relationship]}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{activeMeds.length} medicamento{activeMeds.length !== 1 ? 's' : ''} activo{activeMeds.length !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {activeMeds.length} medicamento{activeMeds.length !== 1 ? 's' : ''} activo{activeMeds.length !== 1 ? 's' : ''}
+          </p>
+          <p className="text-xs text-gray-300 mt-0.5 font-mono" title="Código de identificación">
+            ID: {profile.uuid?.slice(0, 8)}…
+          </p>
         </div>
         {isActive && (
           <div className="w-6 h-6 bg-primary-600 rounded-full flex items-center justify-center">
@@ -252,14 +269,14 @@ function ProfileCard({
         <button onClick={onShare} className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Compartir texto">
           <Share2 size={15} />
         </button>
-        <button onClick={onExport} className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Exportar .json">
+        <button onClick={onExport} className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Exportar .json para compartir">
           <Download size={15} />
         </button>
-        <button onClick={onEdit} className="p-2 text-gray-400 hover:text-primary-600 transition-colors">
+        <button onClick={onEdit} className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Editar perfil">
           <Pencil size={15} />
         </button>
         {!profile.isDefault && (
-          <button onClick={onDelete} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
+          <button onClick={onDelete} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Eliminar perfil">
             <Trash2 size={15} />
           </button>
         )}

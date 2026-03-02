@@ -25,12 +25,28 @@ export function useDoseLogs(profileId: number | undefined, dateStr?: string): Do
   return logs ?? [];
 }
 
-export async function addMedication(medication: Omit<Medication, 'id' | 'createdAt'>) {
-  return db.medications.add({ ...medication, createdAt: new Date() });
+export async function addMedication(medication: Omit<Medication, 'id' | 'createdAt' | 'uuid'> & { uuid?: string }) {
+  return db.medications.add({
+    ...medication,
+    uuid: medication.uuid ?? crypto.randomUUID(),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 }
 
 export async function updateMedication(id: number, changes: Partial<Medication>) {
-  return db.medications.update(id, changes);
+  // Actualiza updatedAt solo si cambiaron campos de esquema
+  const needsTimestamp = changes.scheduleTimes !== undefined
+    || changes.frequency !== undefined
+    || changes.intervalHours !== undefined
+    || changes.specificDays !== undefined
+    || changes.dosage !== undefined
+    || changes.endDate !== undefined;
+
+  return db.medications.update(id, {
+    ...changes,
+    ...(needsTimestamp ? { updatedAt: new Date() } : {}),
+  });
 }
 
 export async function deleteMedication(id: number) {
@@ -46,12 +62,14 @@ export async function logDose(
   status: 'taken' | 'skipped',
   notes?: string
 ) {
+  // Eliminar registro previo del mismo slot si existe
   await db.doseLogs
     .where('medicationId').equals(medicationId)
     .and((l) => l.scheduledDate === scheduledDate && l.scheduledTime === scheduledTime)
     .delete();
 
   const id = await db.doseLogs.add({
+    uuid: crypto.randomUUID(),
     medicationId,
     profileId,
     scheduledTime,

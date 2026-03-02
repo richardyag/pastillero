@@ -4,6 +4,7 @@ export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6; // 0=Sunday
 
 export interface Profile {
   id?: number;
+  uuid: string;        // Identificador estable para sincronización entre dispositivos
   name: string;
   relationship: 'self' | 'parent' | 'child' | 'partner' | 'sibling' | 'other';
   birthDate?: string;
@@ -15,42 +16,45 @@ export interface Profile {
 
 export interface ScheduleTime {
   time: string; // "HH:MM"
-  label?: string; // "Mañana", "Tarde", etc.
+  label?: string;
 }
 
 export interface Medication {
   id?: number;
+  uuid: string;        // Identificador estable para sincronización entre dispositivos
   profileId: number;
   name: string;
   type: MedicationType;
-  dosage: string; // e.g., "10mg", "5ml"
-  instructions?: string; // special instructions
-  photo?: string; // base64 image
-  color: string; // pill color for UI
+  dosage: string;
+  instructions?: string;
+  photo?: string; // base64 — solo local, no se sobreescribe al importar
+  color: string;
   frequency: FrequencyType;
-  intervalHours?: number; // for every_x_hours
-  specificDays?: DayOfWeek[]; // for specific_days
+  intervalHours?: number;
+  specificDays?: DayOfWeek[];
   scheduleTimes: ScheduleTime[];
-  startDate: string; // ISO date
-  endDate?: string; // ISO date, undefined = indefinite
-  totalPills?: number; // for refill tracking
-  remainingPills?: number;
+  startDate: string;
+  endDate?: string;
+  totalPills?: number;
+  remainingPills?: number; // solo local, no se sobreescribe al importar
   notificationsEnabled: boolean;
-  snoozeMinutes: number; // 5, 10, 15, 30
+  snoozeMinutes: number;
   active: boolean;
   createdAt: Date;
+  updatedAt?: Date;    // Fecha de última modificación del esquema
 }
 
 export interface DoseLog {
   id?: number;
+  uuid: string;        // Identificador estable para deduplicación
   medicationId: number;
   profileId: number;
-  scheduledTime: string; // "HH:MM"
-  scheduledDate: string; // ISO date "YYYY-MM-DD"
-  takenAt?: Date; // actual time taken
+  scheduledTime: string;
+  scheduledDate: string;
+  takenAt?: Date;
   status: 'taken' | 'skipped' | 'missed' | 'snoozed';
   notes?: string;
-  photo?: string; // optional dose photo
+  photo?: string;
 }
 
 export interface ScheduledDose {
@@ -67,4 +71,15 @@ export interface ExportData {
   profile: Profile;
   medications: Medication[];
   recentLogs: DoseLog[];
+}
+
+// Resultado detallado del merge para mostrar al usuario
+export interface ImportResult {
+  profileCreated: boolean;
+  profileUpdated: boolean;
+  medicationsAdded: number;
+  medicationsUpdated: number;       // Solo los que cambiaron de esquema
+  medicationsUnchanged: number;     // Los que estaban iguales, sin tocar
+  logsAdded: number;
+  logsDuplicated: number;           // Ignorados por ya existir
 }

@@ -19,7 +19,7 @@ const PROFILE_COLORS = [
 
 interface ProfileFormProps {
   initial?: Partial<Profile>;
-  onSave: (data: Omit<Profile, 'id' | 'createdAt' | 'isDefault'>) => void;
+  onSave: (data: Omit<Profile, 'id' | 'createdAt' | 'isDefault' | 'uuid'>) => void;
   onCancel: () => void;
 }
 
