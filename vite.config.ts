@@ -42,8 +42,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // Navegación offline: sirve index.html para cualquier ruta no encontrada
-        navigateFallback: 'index.html',
+        // Crítico: debe ser la ruta absoluta incluyendo el base de GitHub Pages.
+        // 'index.html' (relativo) hace que Workbox busque /index.html que no existe → 404.
+        navigateFallback: '/pastillero/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
