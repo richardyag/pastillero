@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { ProfileProvider } from './context/ProfileContext';
 import { Home } from './pages/Home';
@@ -10,7 +10,9 @@ import { Settings } from './pages/Settings';
 export default function App() {
   return (
     <ProfileProvider>
-      <BrowserRouter basename="/pastillero">
+      {/* HashRouter: evita 404 en GitHub Pages al navegar entre páginas.
+          Las rutas quedan como /#/medications en lugar de /medications */}
+      <HashRouter>
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<Home />} />
@@ -20,7 +22,7 @@ export default function App() {
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>
-      </BrowserRouter>
+      </HashRouter>
     </ProfileProvider>
   );
 }

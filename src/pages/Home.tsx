@@ -4,29 +4,45 @@ import { format, addDays, subDays, isToday, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { DoseCard } from '../components/medications/DoseCard';
 import { useMedications, useDoseLogs, logDose } from '../hooks/useMedications';
-import { buildScheduledDoses, getTimeBucket, timeBucketLabel, calculateAdherence, getStreakDays, getTodayString } from '../utils/schedule';
-import { requestNotificationPermission, startNotificationChecker, playAlertSound } from '../utils/notifications';
+import {
+  buildScheduledDoses,
+  getTimeBucket,
+  timeBucketLabel,
+  calculateAdherence,
+  getStreakDays,
+  getTodayString,
+} from '../utils/schedule';
+import {
+  requestNotificationPermission,
+  scheduleAllDayNotifications,
+  startInAppChecker,
+  clearAlertedKey,
+  playAlertSound,
+} from '../utils/notifications';
 import { ProfileContext } from '../context/ProfileContext';
 import type { ScheduledDose } from '../types';
 
 export function Home() {
   const { activeProfile } = useContext(ProfileContext);
   const [dateStr, setDateStr] = useState(getTodayString());
-  const [notifGranted, setNotifGranted] = useState(Notification.permission === 'granted');
+  const [notifGranted, setNotifGranted] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission === 'granted' : false
+  );
   const [alertDose, setAlertDose] = useState<ScheduledDose | null>(null);
 
   const medications = useMedications(activeProfile?.id);
-  const todayLogs = useDoseLogs(activeProfile?.id, dateStr);
+  const todayLogs = useDoseLogs(activeProfile?.id, getTodayString());
+  const selectedLogs = useDoseLogs(activeProfile?.id, dateStr);
   const allLogs = useDoseLogs(activeProfile?.id);
 
-  const doses = buildScheduledDoses(medications, todayLogs, dateStr);
+  const doses = buildScheduledDoses(medications, selectedLogs, dateStr);
   const adherence = calculateAdherence(allLogs.slice(-30));
   const streak = getStreakDays(allLogs, getTodayString());
 
   const doneDoses = doses.filter((d) => d.status === 'taken').length;
   const totalDoses = doses.length;
 
-  // Group by time bucket
+  // Agrupar por franja horaria
   const buckets: Record<string, ScheduledDose[]> = {};
   for (const dose of doses) {
     const bucket = getTimeBucket(dose.scheduledTime);
@@ -35,38 +51,66 @@ export function Home() {
   }
   const bucketOrder = ['morning', 'afternoon', 'evening', 'night'];
 
+  // ── 1. Programar notificaciones del sistema ─────────────────────────────────
+  // Se ejecuta cuando cambian medicamentos o registros de HOY.
+  // scheduleAllDayNotifications deduplica internamente con un Set.
   useEffect(() => {
-    startNotificationChecker(
+    if (medications.length === 0) return;
+    scheduleAllDayNotifications(medications, todayLogs, getTodayString());
+  }, [medications, todayLogs]);
+
+  // ── 2. Checker en-app: banner + sonido cuando llega la hora ────────────────
+  useEffect(() => {
+    const cleanup = startInAppChecker(
       () => buildScheduledDoses(medications, todayLogs, getTodayString()),
       (dose) => {
         setAlertDose(dose);
         playAlertSound();
       }
     );
+    return cleanup;
   }, [medications, todayLogs]);
 
   const handleTake = async (dose: ScheduledDose) => {
     if (!activeProfile?.id || !dose.medication.id) return;
-    await logDose(dose.medication.id, activeProfile.id, dose.scheduledTime, dose.scheduledDate, 'taken');
+    await logDose(
+      dose.medication.id,
+      activeProfile.id,
+      dose.scheduledTime,
+      dose.scheduledDate,
+      'taken'
+    );
+    clearAlertedKey(dose.medication.uuid, dose.scheduledDate, dose.scheduledTime);
     if (alertDose?.medication.id === dose.medication.id) setAlertDose(null);
   };
 
   const handleSkip = async (dose: ScheduledDose) => {
     if (!activeProfile?.id || !dose.medication.id) return;
-    await logDose(dose.medication.id, activeProfile.id, dose.scheduledTime, dose.scheduledDate, 'skipped');
+    await logDose(
+      dose.medication.id,
+      activeProfile.id,
+      dose.scheduledTime,
+      dose.scheduledDate,
+      'skipped'
+    );
+    clearAlertedKey(dose.medication.uuid, dose.scheduledDate, dose.scheduledTime);
     if (alertDose?.medication.id === dose.medication.id) setAlertDose(null);
   };
 
   const handleNotifRequest = async () => {
     const granted = await requestNotificationPermission();
     setNotifGranted(granted);
+    if (granted && medications.length > 0) {
+      // Programar inmediatamente las notificaciones pendientes
+      await scheduleAllDayNotifications(medications, todayLogs, getTodayString());
+    }
   };
 
   const isCurrentDay = dateStr === getTodayString();
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Alert banner */}
+      {/* Banner de alerta en-app */}
       {alertDose && (
         <div className="fixed top-0 left-0 right-0 z-40 bg-amber-400 text-amber-900 px-4 py-3 flex items-center gap-3 animate-slide-up shadow-lg">
           <Bell size={20} className="flex-shrink-0 animate-bounce" />
@@ -75,8 +119,18 @@ export function Home() {
             <p className="text-xs opacity-80">{alertDose.medication.dosage}</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => handleSkip(alertDose)} className="text-xs bg-amber-300 px-2 py-1 rounded-lg font-semibold">Omitir</button>
-            <button onClick={() => handleTake(alertDose)} className="text-xs bg-amber-800 text-white px-2 py-1 rounded-lg font-semibold">Tomar</button>
+            <button
+              onClick={() => handleSkip(alertDose)}
+              className="text-xs bg-amber-300 px-2 py-1 rounded-lg font-semibold"
+            >
+              Omitir
+            </button>
+            <button
+              onClick={() => handleTake(alertDose)}
+              className="text-xs bg-amber-800 text-white px-2 py-1 rounded-lg font-semibold"
+            >
+              Tomar
+            </button>
           </div>
         </div>
       )}
@@ -102,9 +156,12 @@ export function Home() {
           )}
         </div>
 
-        {/* Date navigator */}
+        {/* Navegador de fechas */}
         <div className="flex items-center gap-2 mt-3">
-          <button onClick={() => setDateStr(format(subDays(parseISO(dateStr), 1), 'yyyy-MM-dd'))} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+          <button
+            onClick={() => setDateStr(format(subDays(parseISO(dateStr), 1), 'yyyy-MM-dd'))}
+            className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+          >
             <ChevronLeft size={18} />
           </button>
           {[-2, -1, 0, 1, 2].map((offset) => {
@@ -121,21 +178,30 @@ export function Home() {
                 }`}
               >
                 <span className="text-xs font-medium">{format(d, 'EEE', { locale: es })}</span>
-                <span className={`text-base font-bold ${isTodayDate && !isSelected ? 'text-yellow-300' : ''}`}>
+                <span
+                  className={`text-base font-bold ${
+                    isTodayDate && !isSelected ? 'text-yellow-300' : ''
+                  }`}
+                >
                   {format(d, 'd')}
                 </span>
               </button>
             );
           })}
-          <button onClick={() => setDateStr(format(addDays(parseISO(dateStr), 1), 'yyyy-MM-dd'))} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
+          <button
+            onClick={() => setDateStr(format(addDays(parseISO(dateStr), 1), 'yyyy-MM-dd'))}
+            className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+          >
             <ChevronRight size={18} />
           </button>
         </div>
 
-        {/* Stats */}
+        {/* Estadísticas */}
         <div className="grid grid-cols-3 gap-2 mt-4">
           <div className="bg-white/10 rounded-2xl p-3 text-center">
-            <p className="text-2xl font-black">{doneDoses}/{totalDoses}</p>
+            <p className="text-2xl font-black">
+              {doneDoses}/{totalDoses}
+            </p>
             <p className="text-xs text-primary-200 mt-0.5">Dosis hoy</p>
           </div>
           <div className="bg-white/10 rounded-2xl p-3 text-center">
@@ -152,13 +218,16 @@ export function Home() {
         </div>
       </div>
 
-      {/* Dose list */}
+      {/* Lista de dosis */}
       <div className="px-4 py-4 space-y-5">
         {totalDoses === 0 ? (
           <div className="text-center py-16">
             <Pill size={48} className="text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 font-semibold">Sin medicamentos para este día</p>
-            <p className="text-gray-400 text-sm mt-1">Agrega medicamentos en la pestaña <span className="font-medium">Medicamentos</span></p>
+            <p className="text-gray-400 text-sm mt-1">
+              Agrega medicamentos en la pestaña{' '}
+              <span className="font-medium">Medicamentos</span>
+            </p>
           </div>
         ) : (
           bucketOrder
@@ -168,7 +237,8 @@ export function Home() {
                 <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
                   <span>{timeBucketLabel(bucket)}</span>
                   <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full font-semibold">
-                    {buckets[bucket].filter((d) => d.status === 'taken').length}/{buckets[bucket].length}
+                    {buckets[bucket].filter((d) => d.status === 'taken').length}/
+                    {buckets[bucket].length}
                   </span>
                 </h2>
                 <div className="space-y-3">
