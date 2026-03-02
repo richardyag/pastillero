@@ -5,6 +5,7 @@ import { Button } from '../components/common/Button';
 import { MedicationForm } from '../components/medications/MedicationForm';
 import { useMedications, addMedication, updateMedication, deleteMedication } from '../hooks/useMedications';
 import { ProfileContext } from '../context/ProfileContext';
+import { getEffectiveTimes } from '../utils/schedule';
 import type { Medication } from '../types';
 
 const TYPE_EMOJI: Record<string, string> = {
@@ -195,7 +196,7 @@ function MedItem({
               {freqLabel[med.frequency] ?? med.frequency}
             </span>
             <span className="text-xs text-gray-500">
-              {med.scheduleTimes.map((t) => t.time).join(' · ')}
+              {getEffectiveTimes(med).join(' · ')}
             </span>
           </div>
 

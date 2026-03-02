@@ -1,5 +1,5 @@
 import type { Medication, DoseLog } from '../types';
-import { isScheduledForDate } from './schedule';
+import { isScheduledForDate, getEffectiveTimes } from './schedule';
 
 // Ruta base donde están desplegados los assets (GitHub Pages)
 const ICON_URL = `${window.location.origin}/pastillero/pwa-192x192.png`;
@@ -45,7 +45,8 @@ export async function scheduleAllDayNotifications(
     if (!med.active || !med.notificationsEnabled) continue;
     if (!isScheduledForDate(med, dateStr)) continue;
 
-    for (const schedTime of med.scheduleTimes) {
+    for (const time of getEffectiveTimes(med)) {
+      const schedTime = { time };
       const key = `${med.uuid}-${dateStr}-${schedTime.time}`;
 
       // Ya programado esta sesión → saltar
