@@ -82,6 +82,12 @@ export function MedicationForm({ profileId, initial, onSave, onCancel }: Medicat
   const [notifications, setNotifications] = useState(initial?.notificationsEnabled ?? true);
   const [snooze, setSnooze] = useState(initial?.snoozeMinutes ?? 15);
 
+  // Prescripción médica
+  const [prescribedBy, setPrescribedBy] = useState(initial?.prescribedBy ?? '');
+  const [prescriptionDate, setPrescriptionDate] = useState(initial?.prescriptionDate ?? '');
+  const [indication, setIndication] = useState(initial?.indication ?? '');
+  const [isChronic, setIsChronic] = useState(initial?.isChronic ?? false);
+
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Horarios automáticos para "cada X horas" (derivados, no estado propio)
@@ -133,7 +139,11 @@ export function MedicationForm({ profileId, initial, onSave, onCancel }: Medicat
       remainingPills: totalPills ? parseInt(totalPills) : undefined,
       notificationsEnabled: notifications,
       snoozeMinutes: snooze,
-      active: true,
+      active: initial?.active ?? true,
+      prescribedBy: prescribedBy.trim() || undefined,
+      prescriptionDate: prescriptionDate || undefined,
+      indication: indication.trim() || undefined,
+      isChronic,
     });
   };
 
@@ -405,6 +415,64 @@ export function MedicationForm({ profileId, initial, onSave, onCancel }: Medicat
           placeholder="Para llevar cuenta del stock"
           className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
         />
+      </div>
+
+      {/* ── Prescripción médica ──────────────────────────────────── */}
+      <div className="border-t border-gray-100 pt-4 space-y-3">
+        <p className="text-sm font-bold text-gray-700">Prescripción médica <span className="text-gray-400 font-normal">(opcional)</span></p>
+
+        {/* Tipo: crónico o temporal */}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setIsChronic(false)}
+            className={`flex-1 py-2 rounded-xl border-2 text-sm font-medium transition-all ${
+              !isChronic ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-gray-200 text-gray-500'
+            }`}
+          >
+            Temporal
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsChronic(true)}
+            className={`flex-1 py-2 rounded-xl border-2 text-sm font-medium transition-all ${
+              isChronic ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-500'
+            }`}
+          >
+            Crónico
+          </button>
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Médico que lo recetó</label>
+          <input
+            value={prescribedBy}
+            onChange={(e) => setPrescribedBy(e.target.value)}
+            placeholder="Ej: Dr. García"
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha de la receta</label>
+          <input
+            type="date"
+            value={prescriptionDate}
+            onChange={(e) => setPrescriptionDate(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Para qué sirve / indicación</label>
+          <textarea
+            value={indication}
+            onChange={(e) => setIndication(e.target.value)}
+            placeholder="Ej: Control de presión arterial, infección respiratoria..."
+            rows={2}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+          />
+        </div>
       </div>
 
       {/* Notificaciones */}

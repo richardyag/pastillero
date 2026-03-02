@@ -42,6 +42,15 @@ export interface Medication {
   active: boolean;
   createdAt: Date;
   updatedAt?: Date;    // Fecha de última modificación del esquema
+  // Prescripción médica
+  prescribedBy?: string;        // Médico que lo recetó
+  prescriptionDate?: string;    // Fecha de la receta (YYYY-MM-DD)
+  indication?: string;          // Para qué sirve / diagnóstico
+  isChronic?: boolean;          // Tratamiento crónico o temporal
+  // Discontinuación
+  discontinuedAt?: string;      // Fecha en que se dejó de tomar
+  discontinuedReason?: string;  // Motivo para dejar de tomarlo
+  discontinuedBy?: string;      // Quién indicó suspenderlo
 }
 
 export interface DoseLog {

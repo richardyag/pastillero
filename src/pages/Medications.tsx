@@ -1,5 +1,5 @@
 import { useState, useContext } from 'react';
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Package } from 'lucide-react';
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Package, Stethoscope, Info } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
 import { MedicationForm } from '../components/medications/MedicationForm';
@@ -24,6 +24,10 @@ export function Medications() {
   const [showForm, setShowForm] = useState(false);
   const [editMed, setEditMed] = useState<Medication | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Medication | null>(null);
+  const [discontinueTarget, setDiscontinueTarget] = useState<Medication | null>(null);
+  const [discontinuedAt, setDiscontinuedAt] = useState('');
+  const [discontinuedReason, setDiscontinuedReason] = useState('');
+  const [discontinuedBy, setDiscontinuedBy] = useState('');
 
   const handleSave = async (data: Omit<Medication, 'id' | 'createdAt' | 'uuid' | 'updatedAt'>) => {
     if (editMed?.id) {
@@ -42,8 +46,33 @@ export function Medications() {
     }
   };
 
-  const handleToggleActive = async (med: Medication) => {
-    if (med.id) await updateMedication(med.id, { active: !med.active });
+  const handleToggleActive = (med: Medication) => {
+    if (med.active) {
+      // Going inactive → show discontinuation modal
+      setDiscontinuedAt(new Date().toISOString().slice(0, 10));
+      setDiscontinuedReason('');
+      setDiscontinuedBy('');
+      setDiscontinueTarget(med);
+    } else {
+      // Going active → just re-enable (clear discontinuation info)
+      if (med.id) updateMedication(med.id, {
+        active: true,
+        discontinuedAt: undefined,
+        discontinuedReason: undefined,
+        discontinuedBy: undefined,
+      });
+    }
+  };
+
+  const handleDiscontinue = async () => {
+    if (!discontinueTarget?.id) return;
+    await updateMedication(discontinueTarget.id, {
+      active: false,
+      discontinuedAt: discontinuedAt || new Date().toISOString().slice(0, 10),
+      discontinuedReason: discontinuedReason.trim() || undefined,
+      discontinuedBy: discontinuedBy.trim() || undefined,
+    });
+    setDiscontinueTarget(null);
   };
 
   const active = medications.filter((m) => m.active);
@@ -124,6 +153,50 @@ export function Medications() {
         />
       </Modal>
 
+      {/* Discontinue modal */}
+      <Modal
+        isOpen={!!discontinueTarget}
+        onClose={() => setDiscontinueTarget(null)}
+        title={`Dejar de tomar ${discontinueTarget?.name ?? ''}`}
+        size="sm"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-gray-500">Registrá por qué se suspende el medicamento.</p>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha de suspensión</label>
+            <input
+              type="date"
+              value={discontinuedAt}
+              onChange={(e) => setDiscontinuedAt(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Quién indicó suspenderlo (opcional)</label>
+            <input
+              value={discontinuedBy}
+              onChange={(e) => setDiscontinuedBy(e.target.value)}
+              placeholder="Ej: Dr. Ramírez"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Motivo (opcional)</label>
+            <textarea
+              value={discontinuedReason}
+              onChange={(e) => setDiscontinuedReason(e.target.value)}
+              placeholder="Ej: Efectos secundarios, tratamiento completado..."
+              rows={2}
+              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <Button variant="secondary" fullWidth onClick={() => setDiscontinueTarget(null)}>Cancelar</Button>
+            <Button variant="danger" fullWidth onClick={handleDiscontinue}>Suspender</Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Delete confirm */}
       <Modal
         isOpen={!!deleteConfirm}
@@ -191,10 +264,15 @@ function MedItem({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
               {freqLabel[med.frequency] ?? med.frequency}
             </span>
+            {med.isChronic && (
+              <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                Crónico
+              </span>
+            )}
             <span className="text-xs text-gray-500">
               {getEffectiveTimes(med).join(' · ')}
             </span>
@@ -223,8 +301,32 @@ function MedItem({
             </div>
           )}
 
+          {med.indication && (
+            <div className="flex items-start gap-1 mt-1.5">
+              <Info size={11} className="text-blue-400 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-600">{med.indication}</p>
+            </div>
+          )}
+
+          {med.prescribedBy && (
+            <div className="flex items-center gap-1 mt-1">
+              <Stethoscope size={11} className="text-gray-400 flex-shrink-0" />
+              <p className="text-xs text-gray-400">{med.prescribedBy}{med.prescriptionDate ? ` · ${med.prescriptionDate}` : ''}</p>
+            </div>
+          )}
+
           {med.instructions && (
             <p className="text-xs text-gray-400 mt-1.5 italic">{med.instructions}</p>
+          )}
+
+          {!med.active && med.discontinuedReason && (
+            <div className="mt-2 bg-orange-50 border border-orange-100 rounded-xl px-2.5 py-1.5">
+              <p className="text-xs text-orange-700 font-semibold">
+                Suspendido{med.discontinuedAt ? ` el ${med.discontinuedAt}` : ''}
+                {med.discontinuedBy ? ` por ${med.discontinuedBy}` : ''}
+              </p>
+              <p className="text-xs text-orange-600 mt-0.5">{med.discontinuedReason}</p>
+            </div>
           )}
         </div>
       </div>
