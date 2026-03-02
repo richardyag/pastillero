@@ -71,6 +71,11 @@ export function Home() {
     return cleanup;
   }, [medications, todayLogs]);
 
+  const buildSyncCtx = (dose: ScheduledDose) =>
+    activeProfile?.syncEnabled && activeProfile.uuid
+      ? { profileUuid: activeProfile.uuid, medicationUuid: dose.medication.uuid }
+      : undefined;
+
   const handleTake = async (dose: ScheduledDose) => {
     if (!activeProfile?.id || !dose.medication.id) return;
     await logDose(
@@ -78,7 +83,9 @@ export function Home() {
       activeProfile.id,
       dose.scheduledTime,
       dose.scheduledDate,
-      'taken'
+      'taken',
+      undefined,
+      buildSyncCtx(dose)
     );
     clearAlertedKey(dose.medication.uuid, dose.scheduledDate, dose.scheduledTime);
     if (alertDose?.medication.id === dose.medication.id) setAlertDose(null);
@@ -91,7 +98,9 @@ export function Home() {
       activeProfile.id,
       dose.scheduledTime,
       dose.scheduledDate,
-      'skipped'
+      'skipped',
+      undefined,
+      buildSyncCtx(dose)
     );
     clearAlertedKey(dose.medication.uuid, dose.scheduledDate, dose.scheduledTime);
     if (alertDose?.medication.id === dose.medication.id) setAlertDose(null);

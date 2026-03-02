@@ -12,6 +12,8 @@ export interface Profile {
   avatar?: string; // base64
   createdAt: Date;
   isDefault: boolean;
+  syncEnabled?: boolean;  // true = datos sincronizados en Firestore
+  syncRole?: 'owner' | 'member'; // owner: habilitó el sync; member: se unió con código
 }
 
 export interface ScheduleTime {

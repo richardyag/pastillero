@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import type { Medication, DoseLog } from '../types';
+import { pushLog, pushMedication } from './usePatientSync';
 
 export function useMedications(profileId: number | undefined): Medication[] {
   const medications = useLiveQuery<Medication[]>(
@@ -34,7 +35,11 @@ export async function addMedication(medication: Omit<Medication, 'id' | 'created
   });
 }
 
-export async function updateMedication(id: number, changes: Partial<Medication>) {
+export async function updateMedication(
+  id: number,
+  changes: Partial<Medication>,
+  syncCtx?: { profileUuid: string }
+) {
   // Actualiza updatedAt solo si cambiaron campos de esquema
   const needsTimestamp = changes.scheduleTimes !== undefined
     || changes.frequency !== undefined
@@ -43,10 +48,19 @@ export async function updateMedication(id: number, changes: Partial<Medication>)
     || changes.dosage !== undefined
     || changes.endDate !== undefined;
 
-  return db.medications.update(id, {
+  await db.medications.update(id, {
     ...changes,
     ...(needsTimestamp ? { updatedAt: new Date() } : {}),
   });
+
+  // Push a Firestore si el perfil tiene sync habilitado
+  if (syncCtx) {
+    const updated = await db.medications.get(id);
+    if (updated) {
+      pushMedication(syncCtx.profileUuid, updated)
+        .catch((err) => console.warn('[Sync] pushMedication failed:', err));
+    }
+  }
 }
 
 export async function deleteMedication(id: number) {
@@ -60,7 +74,8 @@ export async function logDose(
   scheduledTime: string,
   scheduledDate: string,
   status: 'taken' | 'skipped',
-  notes?: string
+  notes?: string,
+  syncCtx?: { profileUuid: string; medicationUuid: string }
 ) {
   // Eliminar registro previo del mismo slot si existe
   await db.doseLogs
@@ -68,8 +83,9 @@ export async function logDose(
     .and((l) => l.scheduledDate === scheduledDate && l.scheduledTime === scheduledTime)
     .delete();
 
+  const logUuid = crypto.randomUUID();
   const id = await db.doseLogs.add({
-    uuid: crypto.randomUUID(),
+    uuid: logUuid,
     medicationId,
     profileId,
     scheduledTime,
@@ -85,6 +101,15 @@ export async function logDose(
       await db.medications.update(medicationId, {
         remainingPills: med.remainingPills - 1,
       });
+    }
+  }
+
+  // Push a Firestore si el perfil tiene sync habilitado
+  if (syncCtx) {
+    const newLog = await db.doseLogs.get(id);
+    if (newLog) {
+      pushLog(syncCtx.profileUuid, newLog, syncCtx.medicationUuid)
+        .catch((err) => console.warn('[Sync] pushLog failed:', err));
     }
   }
 

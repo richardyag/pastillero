@@ -42,6 +42,17 @@ export class PastilleroDatabase extends Dexie {
         }
       });
     });
+
+    // Versión 3: agrega syncEnabled e syncRole a perfiles (para sincronización en tiempo real)
+    this.version(3).stores({
+      profiles:    '++id, uuid, name, isDefault, syncEnabled, createdAt',
+      medications: '++id, uuid, profileId, name, active, createdAt',
+      doseLogs:    '++id, uuid, medicationId, profileId, scheduledDate, status, takenAt',
+    }).upgrade(async (trans) => {
+      await trans.table('profiles').toCollection().modify((profile) => {
+        if (profile.syncEnabled === undefined) profile.syncEnabled = false;
+      });
+    });
   }
 }
 

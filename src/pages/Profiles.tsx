@@ -1,5 +1,5 @@
 import { useState, useRef, useContext } from 'react';
-import { Plus, Pencil, Trash2, Download, Upload, Share2, Check } from 'lucide-react';
+import { Plus, Pencil, Trash2, Download, Upload, Share2, Check, Cloud, CloudOff, Copy, LogIn } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { Button } from '../components/common/Button';
 import { ProfileForm } from '../components/profiles/ProfileForm';
@@ -7,8 +7,11 @@ import { useProfiles, addProfile, updateProfile, deleteProfile } from '../hooks/
 import { useMedications } from '../hooks/useMedications';
 import { db } from '../db/database';
 import { exportProfileData, downloadExport, parseImportData, generateShareableText, mergeImportData } from '../utils/export';
+import { isFirebaseConfigured } from '../utils/firebase';
+import { uploadAllMedications, fetchRemoteMedications } from '../hooks/usePatientSync';
 import { ProfileContext } from '../context/ProfileContext';
 import type { Profile, ImportResult } from '../types';
+import type { Medication } from '../types';
 
 export function Profiles() {
   const profiles = useProfiles();
@@ -19,6 +22,16 @@ export function Profiles() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importError, setImportError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ── Sync state ──────────────────────────────────────────────────────────────
+  const syncAvailable = isFirebaseConfigured();
+  const [syncModalProfile, setSyncModalProfile] = useState<Profile | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinError, setJoinError] = useState('');
 
   const handleSave = async (data: Omit<Profile, 'id' | 'createdAt' | 'isDefault' | 'uuid'>) => {
     if (editProfile?.id) {
@@ -87,6 +100,105 @@ export function Profiles() {
     e.target.value = '';
   };
 
+  // ── Habilitar sync para un perfil (rol owner) ───────────────────────────────
+  const handleEnableSync = async (profile: Profile) => {
+    if (!profile.id) return;
+    setSyncing(true);
+    try {
+      await updateProfile(profile.id, { syncEnabled: true, syncRole: 'owner' });
+      await uploadAllMedications(profile.uuid, profile.id);
+      // Recargar el perfil actualizado para mostrar el modal con el estado correcto
+      const updated = await db.profiles.get(profile.id);
+      setSyncModalProfile(updated ?? { ...profile, syncEnabled: true, syncRole: 'owner' });
+    } catch (err) {
+      console.error('[Sync] enable failed:', err);
+      alert('Error al activar la sincronización. Verifica tu conexión a internet.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // ── Unirse a un paciente compartido (rol member) ────────────────────────────
+  const handleJoin = async () => {
+    const code = joinCode.trim().toLowerCase();
+    // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
+    if (!code || code.length < 32) {
+      setJoinError('Código inválido. Debe ser el UUID completo del paciente compartido.');
+      return;
+    }
+
+    setJoinLoading(true);
+    setJoinError('');
+
+    try {
+      const meds = await fetchRemoteMedications(code);
+
+      if (meds.length === 0) {
+        setJoinError('Código no encontrado o el paciente aún no tiene medicamentos registrados.');
+        setJoinLoading(false);
+        return;
+      }
+
+      // Ver si ya tenemos este perfil localmente (mismo UUID)
+      const allProfiles = await db.profiles.toArray();
+      const existing = allProfiles.find((p) => p.uuid === code);
+
+      let profileId: number;
+      if (existing?.id) {
+        profileId = existing.id;
+        await updateProfile(profileId, { syncEnabled: true, syncRole: 'member' });
+      } else {
+        // Crear perfil local enlazado al UUID remoto
+        profileId = Number(await addProfile({
+          uuid:        code,
+          name:        'Paciente compartido',
+          relationship: 'other',
+          color:        '#6366f1',
+          isDefault:   false,
+          syncEnabled: true,
+          syncRole:    'member',
+        }));
+      }
+
+      // Insertar medicamentos descargados que no existan localmente
+      for (const med of meds) {
+        const localMed = await db.medications.where('uuid').equals(med.uuid).first();
+        if (!localMed) {
+          await db.medications.add({
+            ...(med as Medication),
+            id:            undefined,
+            profileId,
+            createdAt:     new Date(),
+            updatedAt:     new Date(),
+            remainingPills: (med as Medication).totalPills,
+          });
+        }
+      }
+
+      setActiveProfileId(profileId);
+      setJoinOpen(false);
+      setJoinCode('');
+    } catch (err) {
+      console.error('[Sync] join failed:', err);
+      setJoinError('Error al conectar. Verifica el código e intenta nuevamente.');
+    } finally {
+      setJoinLoading(false);
+    }
+  };
+
+  // ── Desactivar sync ─────────────────────────────────────────────────────────
+  const handleDisableSync = async (profile: Profile) => {
+    if (!profile.id) return;
+    await updateProfile(profile.id, { syncEnabled: false, syncRole: undefined });
+    setSyncModalProfile(null);
+  };
+
+  const handleCopyCode = async (uuid: string) => {
+    await navigator.clipboard.writeText(uuid);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2500);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white px-4 pt-12 pb-4 border-b border-gray-100">
@@ -134,9 +246,7 @@ export function Profiles() {
               </div>
             )}
           </div>
-          <p className="text-xs text-emerald-600 mt-2">
-            Tus propios datos no fueron modificados.
-          </p>
+          <p className="text-xs text-emerald-600 mt-2">Tus propios datos no fueron modificados.</p>
         </div>
       )}
 
@@ -163,17 +273,40 @@ export function Profiles() {
         </button>
         <input ref={fileRef} type="file" accept=".json" onChange={handleImportFile} className="hidden" />
 
+        {/* Join shared patient button — solo si Firebase está configurado */}
+        {syncAvailable && (
+          <button
+            onClick={() => { setJoinCode(''); setJoinError(''); setJoinOpen(true); }}
+            className="w-full flex items-center gap-3 bg-white border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-2xl p-4 transition-colors text-left"
+          >
+            <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center">
+              <LogIn size={20} className="text-indigo-500" />
+            </div>
+            <div>
+              <p className="font-semibold text-gray-700 text-sm">Unirse a paciente compartido</p>
+              <p className="text-xs text-gray-400">Ingresa el código de sincronización que te compartió un familiar.</p>
+            </div>
+          </button>
+        )}
+
         {/* Profile list */}
         {profiles.map((profile) => (
           <ProfileCard
             key={profile.id}
             profile={profile}
             isActive={activeProfile?.id === profile.id}
+            syncAvailable={syncAvailable}
+            syncing={syncing}
             onSelect={() => setActiveProfileId(profile.id!)}
             onEdit={() => { setEditProfile(profile); setShowForm(true); }}
             onDelete={() => setDeleteConfirm(profile)}
             onExport={() => handleExport(profile)}
             onShare={() => handleShareText(profile)}
+            onSyncToggle={() =>
+              profile.syncEnabled
+                ? setSyncModalProfile(profile)
+                : handleEnableSync(profile)
+            }
           />
         ))}
       </div>
@@ -206,20 +339,118 @@ export function Profiles() {
           <Button variant="danger" fullWidth onClick={handleDelete}>Eliminar</Button>
         </div>
       </Modal>
+
+      {/* Sync code modal — muestra el código al owner */}
+      <Modal
+        isOpen={!!syncModalProfile}
+        onClose={() => setSyncModalProfile(null)}
+        title="Sincronización en tiempo real"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 rounded-xl p-3">
+            <Cloud size={16} className="flex-shrink-0" />
+            <p className="text-xs font-semibold">
+              Sincronización activa para <strong>{syncModalProfile?.name}</strong>
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-gray-600 mb-1">Código para compartir con tu familiar:</p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+              <p className="font-mono text-xs text-gray-800 break-all leading-relaxed">
+                {syncModalProfile?.uuid}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            fullWidth
+            variant="secondary"
+            onClick={() => handleCopyCode(syncModalProfile?.uuid ?? '')}
+          >
+            {codeCopied
+              ? <><Check size={16} className="text-emerald-500" /> Copiado</>
+              : <><Copy size={16} /> Copiar código</>
+            }
+          </Button>
+
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+            <p className="text-xs text-amber-800 leading-relaxed">
+              Tu familiar debe ir a <strong>Perfiles → Unirse a paciente compartido</strong> y pegar este código.
+              Los registros de dosis se actualizarán en tiempo real en ambos dispositivos.
+            </p>
+          </div>
+
+          <p className="text-xs text-gray-400 text-center">
+            Las fotos y preferencias locales no se comparten.
+          </p>
+
+          <button
+            onClick={() => handleDisableSync(syncModalProfile!)}
+            className="w-full text-xs text-red-400 hover:text-red-600 py-1 transition-colors"
+          >
+            Desactivar sincronización para este perfil
+          </button>
+        </div>
+      </Modal>
+
+      {/* Join modal — para el familiar que se une */}
+      <Modal
+        isOpen={joinOpen}
+        onClose={() => { setJoinOpen(false); setJoinCode(''); setJoinError(''); }}
+        title="Unirse a paciente compartido"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Pegá el código UUID que te compartió el familiar que configuró la sincronización.
+          </p>
+          <textarea
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value)}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            rows={3}
+            className="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+          />
+          {joinError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-xl p-2">{joinError}</p>
+          )}
+          <div className="flex gap-3">
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => { setJoinOpen(false); setJoinCode(''); setJoinError(''); }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              fullWidth
+              onClick={handleJoin}
+              disabled={joinLoading}
+            >
+              {joinLoading ? 'Conectando…' : 'Conectar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 function ProfileCard({
-  profile, isActive, onSelect, onEdit, onDelete, onExport, onShare
+  profile, isActive, syncAvailable, syncing, onSelect, onEdit, onDelete, onExport, onShare, onSyncToggle
 }: {
   profile: Profile;
   isActive: boolean;
+  syncAvailable: boolean;
+  syncing: boolean;
   onSelect: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onExport: () => void;
   onShare: () => void;
+  onSyncToggle: () => void;
 }) {
   const medications = useMedications(profile.id);
   const activeMeds = medications.filter((m) => m.active);
@@ -251,9 +482,15 @@ function ProfileCard({
           <p className="text-xs text-gray-400 mt-0.5">
             {activeMeds.length} medicamento{activeMeds.length !== 1 ? 's' : ''} activo{activeMeds.length !== 1 ? 's' : ''}
           </p>
-          <p className="text-xs text-gray-300 mt-0.5 font-mono" title="Código de identificación">
-            ID: {profile.uuid?.slice(0, 8)}…
-          </p>
+          {profile.syncEnabled ? (
+            <span className="inline-flex items-center gap-1 text-xs text-indigo-600 font-medium mt-0.5">
+              <Cloud size={11} /> Sincronizado en tiempo real
+            </span>
+          ) : (
+            <p className="text-xs text-gray-300 mt-0.5 font-mono" title="Código de identificación">
+              ID: {profile.uuid?.slice(0, 8)}…
+            </p>
+          )}
         </div>
         {isActive && (
           <div className="w-6 h-6 bg-primary-600 rounded-full flex items-center justify-center">
@@ -266,6 +503,19 @@ function ProfileCard({
         <span className="text-xs text-gray-400 flex-1 font-medium">
           {isActive ? '✓ Perfil activo' : 'Toca para activar'}
         </span>
+        {syncAvailable && (
+          <button
+            onClick={onSyncToggle}
+            disabled={syncing}
+            className="p-2 transition-colors"
+            title={profile.syncEnabled ? 'Sincronización activa — ver código' : 'Activar sincronización en tiempo real'}
+          >
+            {profile.syncEnabled
+              ? <Cloud size={15} className="text-indigo-500" />
+              : <CloudOff size={15} className="text-gray-300 hover:text-indigo-400" />
+            }
+          </button>
+        )}
         <button onClick={onShare} className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Compartir texto">
           <Share2 size={15} />
         </button>
