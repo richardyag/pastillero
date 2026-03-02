@@ -16,7 +16,11 @@ export default defineConfig({
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        // Crítico: debe apuntar a la ruta donde está la app en GitHub Pages.
+        // Con HashRouter la URL real es /pastillero/#/ pero el navegador
+        // carga /pastillero/ y el hash lo maneja el cliente, así que esto funciona.
+        start_url: '/pastillero/',
+        scope: '/pastillero/',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -38,6 +42,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Navegación offline: sirve index.html para cualquier ruta no encontrada
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
