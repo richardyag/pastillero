@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Pastillero</title>
+  <style>
+    body { font-family: sans-serif; display: flex; align-items: center;
+           justify-content: center; min-height: 100vh; margin: 0;
+           background: #f9fafb; flex-direction: column; gap: 1rem; }
+    p { color: #6b7280; font-size: 0.9rem; }
+  </style>
+  <script>
+    // GitHub Pages sirve este archivo cuando una URL no existe.
+    // Redirigimos al inicio de la app con el hash original preservado.
+    var path = window.location.pathname;
+    var hash = window.location.hash;
+    // Si ya estamos en /pastillero/ solo redirigir al hash
+    if (path.indexOf('/pastillero') === -1) {
+      window.location.replace('/pastillero/' + (hash || ''));
+    } else {
+      window.location.replace('/pastillero/' + (hash || ''));
+    }
+  </script>
+</head>
+<body>
+  <span style="font-size:3rem">💊</span>
+  <p>Cargando Pastillero…</p>
+</body>
+</html>
